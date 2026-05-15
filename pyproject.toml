@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 license = {text = "MIT"}
-dependencies = []
+dependencies = [
+    "polars>=1.40.1",
+]
 
 [dependency-groups]
 dev = [
