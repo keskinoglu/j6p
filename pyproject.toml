@@ -1,0 +1,42 @@
+[project]
+name = "j6p"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+license = {text = "MIT"}
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-xdist",
+    "ruff",
+    "commitizen",
+    "ipykernel",
+]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "pep440"
+version_provider = "pep621"
+update_changelog_on_bump = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q -p no:warnings"
+testpaths = [
+    "tests",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
+]
