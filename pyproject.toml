@@ -37,6 +37,9 @@ addopts = "-ra -q -p no:warnings"
 testpaths = [
     "tests",
 ]
+pythonpath = [
+    "src",
+]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as unit tests",
