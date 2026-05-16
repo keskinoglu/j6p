@@ -1,3 +1,3 @@
-from j6p.blocks import Block, FusionBlock, SourceBlock
+from j6p.blocks import Block, LeafBlock, LeafETL, NodeBlock, NodeETL
 
-__all__ = ["Block", "FusionBlock", "SourceBlock"]
+__all__ = ["Block", "LeafBlock", "LeafETL", "NodeBlock", "NodeETL"]
