@@ -1,17 +1,30 @@
-"""Transformers: one-to-one frame transformations.
+"""Transformers: frame transformations injected into blocks.
 
-A Transformer is a **1 -> 1** mapping — it takes a single LazyFrame and returns
-a single LazyFrame with some normalization applied. It is the `transformer` of
-a `LeafETL` (see `j6p.blocks`).
+Two kinds live here, split by section:
 
-For the **N -> 1** case (combining several frames into one) see the Fusers in
-`j6p.fusers`: a Fuser is the same idea, kept in a separate module to make the
-many-to-one nature explicit.
+- **1 -> 1** transformers (`Transformer`): one LazyFrame -> one LazyFrame.
+  Used as a `LeafETL.transformer` (see `j6p.blocks`).
+- **N -> 1** fusion transformers (`Fuser`): a list of LazyFrames -> one
+  LazyFrame — i.e. how multiple frames are joined. Used as a
+  `NodeETL.transformer`.
+
+A fuser is essentially a transformer; both are kept in this one module, the
+section comments making the 1->1 vs N->1 distinction explicit.
 """
 
 import polars as pl
+
+# ---- 1 -> 1 transformers ----
 
 
 def identity(frame: pl.LazyFrame) -> pl.LazyFrame:
     """The explicit 1 -> 1 no-op: return the frame unchanged."""
     return frame
+
+
+# ---- N -> 1 fusion transformers ----
+
+
+def vertical_concat(frames: list[pl.LazyFrame]) -> pl.LazyFrame:
+    """Stack frames vertically (union); all frames must share the same schema."""
+    return pl.concat(frames)
