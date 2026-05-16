@@ -1,8 +1,12 @@
-"""Multi-frame join and merge strategies.
+"""Fusers: many-to-one frame transformations — how multiple frames are joined.
 
-Each function here is a Fuser: it receives a list of LazyFrames (the outputs of
-upstream blocks) and returns a single LazyFrame. Inject one into a FusionBlock
-via the `fuser=` argument.
+A Fuser is essentially a Transformer, but **N -> 1**: it takes a list of
+LazyFrames (the outputs of a node's child blocks) and returns a single
+LazyFrame. It lives in its own module — rather than beside the 1 -> 1
+Transformers in `j6p.transformers` — to make explicit that this is the
+many-to-one case, and that a Fuser *is how multiple frames are joined* into one.
+
+It is the `transformer` of a `NodeETL` (see `j6p.blocks`).
 """
 
 import polars as pl
