@@ -2,10 +2,9 @@ import polars as pl
 import pytest
 
 from j6p.blocks import Block, LeafBlock, LeafETL, NodeBlock, NodeETL
-from j6p.fusers import vertical_concat
-from j6p.readers import parquet_reader
-from j6p.transformers import identity
-from j6p.writers import parquet_writer
+from j6p.extractors import parquet_reader
+from j6p.loaders import parquet_writer
+from j6p.transformers import identity, vertical_concat
 
 
 def _make_reader(data: dict | None = None):
