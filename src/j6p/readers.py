@@ -1,13 +1,12 @@
 import json
-from collections.abc import Callable
 from pathlib import Path
 
 import polars as pl
 
-_Reader = Callable[[], pl.LazyFrame]
+from j6p.type_aliases import Reader
 
 
-def json_reader(path: str | Path, *, key: str | None = None) -> _Reader:
+def json_reader(path: str | Path, *, key: str | None = None) -> Reader:
     """Return a reader for a JSON file.
 
     Args:
@@ -28,7 +27,7 @@ def json_reader(path: str | Path, *, key: str | None = None) -> _Reader:
     return _read
 
 
-def xml_reader(path: str | Path) -> _Reader:
+def xml_reader(path: str | Path) -> Reader:
     """Return a reader for a Schwab OFX/XML 1099 file.
 
     Not yet implemented — polars has no native XML scan. Parsing via stdlib xml
@@ -42,7 +41,7 @@ def xml_reader(path: str | Path) -> _Reader:
     return _read
 
 
-def xls_reader(path: str | Path, **kwargs) -> _Reader:
+def xls_reader(path: str | Path, **kwargs) -> Reader:
     """Return a reader for an Excel file (.xls / .xlsx).
 
     Requires an Excel engine (fastexcel or xlsx2csv for .xlsx; xlrd for .xls).
@@ -56,7 +55,7 @@ def xls_reader(path: str | Path, **kwargs) -> _Reader:
     return _read
 
 
-def parquet_reader(path: str | Path) -> _Reader:
+def parquet_reader(path: str | Path) -> Reader:
     """Return a reader for a previously-written Parquet file."""
     p = Path(path)
 
