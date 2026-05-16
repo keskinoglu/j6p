@@ -19,8 +19,8 @@ def _make_reader(data: dict | None = None):
 def _capture_writer():
     received: list[pl.DataFrame] = []
 
-    def _write(frame: pl.LazyFrame) -> None:
-        received.append(frame.collect())
+    def _write(lazy_frame: pl.LazyFrame) -> None:
+        received.append(lazy_frame.collect())
 
     return _write, received
 
@@ -45,8 +45,8 @@ def test_leaf_block_extractor_is_invoked():
 
 
 def test_leaf_block_transformer_is_applied():
-    def add_col(frame: pl.LazyFrame) -> pl.LazyFrame:
-        return frame.with_columns(pl.lit(99).alias("added"))
+    def add_col(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+        return lazy_frame.with_columns(pl.lit(99).alias("added"))
 
     result = LeafBlock(LeafETL(extractor=_make_reader(), transformer=add_col)).collect()
     assert "added" in result.columns
@@ -135,9 +135,9 @@ def test_node_block_run_returns_lazy_frame():
 def test_node_block_fuser_receives_all_frames():
     received: list[list[pl.LazyFrame]] = []
 
-    def capturing_fuser(frames: list[pl.LazyFrame]) -> pl.LazyFrame:
-        received.append(frames)
-        return pl.concat(frames)
+    def capturing_fuser(lazy_frames: list[pl.LazyFrame]) -> pl.LazyFrame:
+        received.append(lazy_frames)
+        return pl.concat(lazy_frames)
 
     NodeBlock(
         NodeETL(

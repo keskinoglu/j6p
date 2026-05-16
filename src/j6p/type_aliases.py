@@ -1,9 +1,8 @@
 from collections.abc import Callable
 
-import polars as pl
+from polars import LazyFrame
 
-Frame = pl.LazyFrame
-Reader = Callable[[], Frame]  # leaf extractor: reads ONE source
-Transformer = Callable[[Frame], Frame]  # leaf transformer: 1 -> 1
-Fuser = Callable[[list[Frame]], Frame]  # node transformer: N -> 1
-Writer = Callable[[Frame], None]  # loader: side-effect, returns nothing
+Reader = Callable[[], LazyFrame]  # leaf extractor: reads ONE source
+Transformer = Callable[[LazyFrame], LazyFrame]  # leaf transformer: 1 -> 1
+Fuser = Callable[[list[LazyFrame]], LazyFrame]  # node transformer: N -> 1
+Writer = Callable[[LazyFrame], None]  # loader: side-effect, returns nothing
