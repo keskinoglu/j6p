@@ -1,3 +1,8 @@
+"""Loaders: destination-specific writers that persist a LazyFrame to storage.
+
+A writer is the `loader` of a `LeafETL` or `NodeETL` (see `j6p.blocks`).
+"""
+
 from pathlib import Path
 
 import polars as pl
