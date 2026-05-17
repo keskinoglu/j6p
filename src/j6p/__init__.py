@@ -1,3 +1,3 @@
-from j6p.blocks import Block, LeafBlock, LeafETL, NodeBlock, NodeETL
+from j6p.etl import ETL, LeafETL, NodeETL
 
-__all__ = ["Block", "LeafBlock", "LeafETL", "NodeBlock", "NodeETL"]
+__all__ = ["ETL", "LeafETL", "NodeETL"]
