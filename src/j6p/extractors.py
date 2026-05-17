@@ -1,7 +1,7 @@
 """Extractors: source-specific readers that produce a single LazyFrame.
 
-A reader is the `extractor` of a `LeafETL` (see `j6p.blocks`). Readers are
-specific to their *source*, not merely the file format, so readers are grouped
+An `Extractor` is the `extractor` of a `LeafETL` (see `j6p.etl`). Extractors
+are specific to their *source*, not merely the file format, so they are grouped
 by source below.
 """
 
@@ -10,12 +10,12 @@ from pathlib import Path
 
 import polars as pl
 
-from j6p.type_aliases import Reader
+from j6p.type_aliases import Extractor
 
 # ---- Schwab ----
 
 
-def schwab_json_reader(path: str | Path, *, key: str | None = None) -> Reader:
+def schwab_json_reader(path: str | Path, *, key: str | None = None) -> Extractor:
     """Return a reader for a Schwab banking/investment transaction JSON file.
 
     Schwab transaction exports are a JSON object with the records nested under
@@ -29,17 +29,17 @@ def schwab_json_reader(path: str | Path, *, key: str | None = None) -> Reader:
     """
     p = Path(path)
 
-    def _read() -> pl.LazyFrame:
+    def extractor() -> pl.LazyFrame:
         if key is None:
             return pl.read_json(p).lazy()
         with open(p) as f:
             data = json.load(f)
         return pl.DataFrame(data[key]).lazy()
 
-    return _read
+    return extractor
 
 
-def schwab_xml_reader(path: str | Path) -> Reader:
+def schwab_xml_reader(path: str | Path) -> Extractor:
     """Return a reader for a Schwab OFX/XML 1099 file.
 
     Not yet implemented — polars has no native XML scan. Parsing via stdlib xml
@@ -47,16 +47,16 @@ def schwab_xml_reader(path: str | Path) -> Reader:
     """
     p = Path(path)
 
-    def _read() -> pl.LazyFrame:
+    def extractor() -> pl.LazyFrame:
         raise NotImplementedError(f"schwab_xml_reader not yet implemented for {p}")
 
-    return _read
+    return extractor
 
 
 # ---- Generic ----
 
 
-def xls_reader(path: str | Path, **kwargs) -> Reader:
+def xls_reader(path: str | Path, **kwargs) -> Extractor:
     """Return a reader for an Excel file (.xls / .xlsx).
 
     Requires an Excel engine (fastexcel or xlsx2csv for .xlsx; xlrd for .xls).
@@ -64,17 +64,17 @@ def xls_reader(path: str | Path, **kwargs) -> Reader:
     """
     p = Path(path)
 
-    def _read() -> pl.LazyFrame:
+    def extractor() -> pl.LazyFrame:
         return pl.read_excel(p, **kwargs).lazy()
 
-    return _read
+    return extractor
 
 
-def parquet_reader(path: str | Path) -> Reader:
+def parquet_reader(path: str | Path) -> Extractor:
     """Return a reader for a previously-written Parquet file."""
     p = Path(path)
 
-    def _read() -> pl.LazyFrame:
+    def extractor() -> pl.LazyFrame:
         return pl.scan_parquet(p)
 
-    return _read
+    return extractor
