@@ -1,94 +1,96 @@
-"""The block tree: a data pipeline shaped as a tree of ETL blocks.
+"""The ETL tree: a data pipeline shaped as a tree of ETL nodes.
 
-Each `Block` is one node in the tree and runs an ETL — extract, transform, then
-optionally save — always returning a lazy frame.
+Each `ETL` is one node in the tree and runs an ETL — extract, transform, load
+— always returning a lazy frame (the load step may be a no-op; see
+`j6p.loaders.return_only`).
 
-- `LeafBlock` is a **leaf node**: it extracts from a single source (a `Reader`)
-  and applies a 1 -> 1 `Transformer`.
-- `NodeBlock` is a **non-leaf (internal) node**: its children are other
-  `Block`s; it extracts their lazy frames and fuses them with an N -> 1 `Fuser`.
+- `LeafETL` is a **leaf node**: it extracts from a single source (an
+  `Extractor`) and applies a 1 -> 1 `Transformer`.
+- `NodeETL` is a **non-leaf (internal) node**: its children are other `ETL`s;
+  it extracts their lazy frames and fuses them with an N -> 1 `Fuser`.
 
-A `NodeBlock`'s children are themselves `Block`s, so nodes nest to any depth:
-the leaves read the raw sources and each internal tier fuses the tier below it,
-up to a single root.
+A `NodeETL`'s children are themselves `ETL`s, so nodes nest to any depth: the
+leaves read the raw sources and each internal tier fuses the tier below it, up
+to a single root.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 import polars as pl
 
-from j6p.type_aliases import Fuser, LazyFrame, Reader, Transformer, Writer
+from j6p.type_aliases import Extractor, Fuser, LazyFrame, Loader, Transformer
 
 
-class Block[ExtractedPayload](ABC):
-    """One node in the block tree: runs an ETL and returns a lazy frame.
+class ETL[ExtractedPayload, TransformedPayload](ABC):
+    """One node in the ETL tree: runs an ETL and returns a lazy frame.
 
-    `run()` extracts, transforms, and always returns the lazy frame; with
-    `write=True` it also loads. Subclasses implement `_extract` / `_transform`.
+    `run()` extracts, transforms, then loads, returning the lazy frame; the
+    injected loader decides whether anything is persisted. Subclasses implement
+    `_extract` / `_transform` / `_load`.
     """
 
-    def __init__(self, loader: Writer | None) -> None:
-        self._loader = loader
+    def run(self) -> LazyFrame:
+        return self._load(self._transform(self._extract()))
 
-    def run(self, *, write: bool = False) -> LazyFrame:
-        lazy_frame = self._transform(self._extract())
-        if write:
-            if self._loader is None:
-                raise ValueError("a loader is required when write=True")
-            self._loader(lazy_frame)
-        return lazy_frame
-
-    def collect(self, *, write: bool = False) -> pl.DataFrame:
-        return self.run(write=write).collect()
+    def collect(self) -> pl.DataFrame:
+        return self.run().collect()
 
     @abstractmethod
     def _extract(self) -> ExtractedPayload: ...
 
     @abstractmethod
-    def _transform(self, extracted: ExtractedPayload) -> LazyFrame: ...
+    def _transform(self, extracted: ExtractedPayload) -> TransformedPayload: ...
+
+    @abstractmethod
+    def _load(self, transformed: TransformedPayload) -> LazyFrame: ...
 
 
-class LeafBlock(Block[LazyFrame]):
+class LeafETL(ETL[LazyFrame, LazyFrame]):
     """A leaf node: extracts from one source and applies a 1 -> 1 transformer."""
 
-    def __init__(self, etl: LeafETL) -> None:
-        super().__init__(etl.loader)
-        self._etl = etl
+    def __init__(
+        self,
+        *,
+        extractor: Extractor,
+        transformer: Transformer,
+        loader: Loader,
+    ) -> None:
+        self._extractor = extractor
+        self._transformer = transformer
+        self._loader = loader
 
     def _extract(self) -> LazyFrame:
-        return self._etl.extractor()
+        return self._extractor()
 
     def _transform(self, extracted: LazyFrame) -> LazyFrame:
-        return self._etl.transformer(extracted)
+        return self._transformer(extracted)
+
+    def _load(self, transformed: LazyFrame) -> LazyFrame:
+        return self._loader(transformed)
 
 
-class NodeBlock(Block[list[LazyFrame]]):
-    """A non-leaf (internal) node: fuses its child blocks with an N -> 1 fuser."""
+class NodeETL(ETL[list[LazyFrame], LazyFrame]):
+    """A non-leaf (internal) node: fuses its child ETLs with an N -> 1 fuser."""
 
-    def __init__(self, etl: NodeETL) -> None:
-        super().__init__(etl.loader)
-        self._etl = etl
+    def __init__(
+        self,
+        *,
+        extractor: Sequence[ETL],
+        transformer: Fuser,
+        loader: Loader,
+    ) -> None:
+        self._extractor = extractor
+        self._transformer = transformer
+        self._loader = loader
 
     def _extract(self) -> list[LazyFrame]:
-        return [block.run() for block in self._etl.extractor]
+        return [child.run() for child in self._extractor]
 
     def _transform(self, extracted: list[LazyFrame]) -> LazyFrame:
-        return self._etl.transformer(extracted)
+        return self._transformer(extracted)
 
-
-@dataclass(frozen=True, slots=True)
-class LeafETL:
-    extractor: Reader
-    transformer: Transformer
-    loader: Writer | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class NodeETL:
-    extractor: Sequence[Block]
-    transformer: Fuser
-    loader: Writer | None = None
+    def _load(self, transformed: LazyFrame) -> LazyFrame:
+        return self._loader(transformed)

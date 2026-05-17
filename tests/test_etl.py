@@ -30,7 +30,9 @@ def _capture_writer():
 
 
 def test_leaf_etl_run_returns_lazy_frame():
-    etl = LeafETL(extractor=_make_reader(), transformer=identity, loader=return_only)
+    etl = LeafETL(
+        extractor=_make_reader(), transformer=identity(), loader=return_only()
+    )
     assert isinstance(etl.run(), pl.LazyFrame)
 
 
@@ -41,7 +43,9 @@ def test_leaf_etl_extractor_is_invoked():
         calls.append(1)
         return pl.DataFrame({"v": [1]}).lazy()
 
-    LeafETL(extractor=counting_reader, transformer=identity, loader=return_only).run()
+    LeafETL(
+        extractor=counting_reader, transformer=identity(), loader=return_only()
+    ).run()
     assert len(calls) == 1
 
 
@@ -50,33 +54,35 @@ def test_leaf_etl_transformer_is_applied():
         return lazy_frame.with_columns(pl.lit(99).alias("added"))
 
     result = LeafETL(
-        extractor=_make_reader(), transformer=add_col, loader=return_only
+        extractor=_make_reader(), transformer=add_col, loader=return_only()
     ).collect()
     assert "added" in result.columns
 
 
 def test_leaf_etl_invokes_loader():
     loader, received = _capture_writer()
-    LeafETL(extractor=_make_reader(), transformer=identity, loader=loader).run()
+    LeafETL(extractor=_make_reader(), transformer=identity(), loader=loader).run()
     assert len(received) == 1
 
 
 def test_leaf_etl_requires_loader():
     with pytest.raises(TypeError):
-        LeafETL(extractor=_make_reader(), transformer=identity)
+        LeafETL(extractor=_make_reader(), transformer=identity())
 
 
 # --- collect() ---
 
 
 def test_collect_returns_dataframe():
-    etl = LeafETL(extractor=_make_reader(), transformer=identity, loader=return_only)
+    etl = LeafETL(
+        extractor=_make_reader(), transformer=identity(), loader=return_only()
+    )
     assert isinstance(etl.collect(), pl.DataFrame)
 
 
 def test_collect_invokes_loader():
     loader, received = _capture_writer()
-    LeafETL(extractor=_make_reader(), transformer=identity, loader=loader).collect()
+    LeafETL(extractor=_make_reader(), transformer=identity(), loader=loader).collect()
     assert len(received) == 1
 
 
@@ -85,12 +91,12 @@ def test_collect_invokes_loader():
 
 def test_leaf_etl_requires_transformer():
     with pytest.raises(TypeError):
-        LeafETL(extractor=_make_reader(), loader=return_only)
+        LeafETL(extractor=_make_reader(), loader=return_only())
 
 
 def test_node_etl_requires_transformer():
     with pytest.raises(TypeError):
-        NodeETL(extractor=[], loader=return_only)
+        NodeETL(extractor=[], loader=return_only())
 
 
 # --- Parquet round-trip (parquet is just a reader) ---
@@ -100,13 +106,15 @@ def test_parquet_roundtrip_via_parquet_reader(tmp_path):
     outfile = tmp_path / "tier0.parquet"
     source = LeafETL(
         extractor=_make_reader({"a": [10, 20], "b": ["x", "y"]}),
-        transformer=identity,
+        transformer=identity(),
         loader=parquet_writer(outfile),
     )
     source.run()
 
     cached = LeafETL(
-        extractor=parquet_reader(outfile), transformer=identity, loader=return_only
+        extractor=parquet_reader(outfile),
+        transformer=identity(),
+        loader=return_only(),
     )
     result = cached.collect()
     assert result["a"].to_list() == [10, 20]
@@ -118,15 +126,15 @@ def test_parquet_roundtrip_via_parquet_reader(tmp_path):
 
 def _leaf(data: dict) -> LeafETL:
     return LeafETL(
-        extractor=_make_reader(data), transformer=identity, loader=return_only
+        extractor=_make_reader(data), transformer=identity(), loader=return_only()
     )
 
 
 def test_node_etl_run_returns_lazy_frame():
     node = NodeETL(
         extractor=[_leaf({"v": [1]}), _leaf({"v": [2]})],
-        transformer=vertical_concat,
-        loader=return_only,
+        transformer=vertical_concat(),
+        loader=return_only(),
     )
     assert isinstance(node.run(), pl.LazyFrame)
 
@@ -141,7 +149,7 @@ def test_node_etl_fuser_receives_all_frames():
     NodeETL(
         extractor=[_leaf({"v": [1]}), _leaf({"v": [2]})],
         transformer=capturing_fuser,
-        loader=return_only,
+        loader=return_only(),
     ).collect()
 
     assert len(received) == 1
@@ -151,13 +159,13 @@ def test_node_etl_fuser_receives_all_frames():
 def test_node_etl_chaining_three_tiers():
     tier1 = NodeETL(
         extractor=[_leaf({"v": [1]}), _leaf({"v": [2]})],
-        transformer=vertical_concat,
-        loader=return_only,
+        transformer=vertical_concat(),
+        loader=return_only(),
     )
     tier2 = NodeETL(
         extractor=[tier1, _leaf({"v": [3]})],
-        transformer=vertical_concat,
-        loader=return_only,
+        transformer=vertical_concat(),
+        loader=return_only(),
     )
     assert tier2.collect()["v"].to_list() == [1, 2, 3]
 
@@ -167,11 +175,13 @@ def test_node_etl_is_substitutable_for_etl():
         return e.collect()
 
     node = NodeETL(
-        extractor=[_leaf({"v": [1]})], transformer=vertical_concat, loader=return_only
+        extractor=[_leaf({"v": [1]})],
+        transformer=vertical_concat(),
+        loader=return_only(),
     )
     assert isinstance(accepts_any_etl(node), pl.DataFrame)
 
 
 def test_return_only_is_passthrough():
     lf = pl.DataFrame({"v": [1]}).lazy()
-    assert return_only(lf) is lf
+    assert return_only()(lf) is lf
