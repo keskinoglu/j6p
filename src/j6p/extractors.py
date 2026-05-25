@@ -15,7 +15,9 @@ from j6p.type_aliases import Extractor
 # ---- Schwab ----
 
 
-def schwab_json_reader(path: str | Path, *, key: str | None = None) -> Extractor:
+def schwab_json_reader(
+    path: str | Path, *, key_containing_records: str | None = None
+) -> Extractor:
     """Return a reader for a Schwab banking/investment transaction JSON file.
 
     Schwab transaction exports are a JSON object with the records nested under
@@ -24,17 +26,17 @@ def schwab_json_reader(path: str | Path, *, key: str | None = None) -> Extractor
 
     Args:
         path: Path to the Schwab JSON file.
-        key: The key whose value is the list of transaction records. When
-             None, the file must be a bare JSON array.
+        key_containing_records: The key whose value is the list of transaction
+            records. When None, the file must be a bare JSON array.
     """
     p = Path(path)
 
     def extractor() -> pl.LazyFrame:
-        if key is None:
+        if key_containing_records is None:
             return pl.read_json(p).lazy()
         with open(p) as f:
             data = json.load(f)
-        return pl.DataFrame(data[key]).lazy()
+        return pl.DataFrame(data[key_containing_records]).lazy()
 
     return extractor
 
