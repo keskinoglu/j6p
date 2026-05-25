@@ -40,8 +40,24 @@ def schwab_brokerage_transformer() -> Transformer:
             date_format="%m/%d/%Y",
             timezone="America/New_York",
         )
-        lazy_frame_with_reordered_columns = _reorder_columns(
+        lazy_frame_with_usd_str_to_decimal = _convert_usd_string_to_decimal(
             lazy_frame_with_localized_dates,
+            columns=["Price", "Fees & Comm", "Amount"],
+            total_digits=18,
+            digits_after_decimal_point=4,
+        )
+        lazy_frame_with_integer_quantity = _convert_string_to_unsigned_integer(
+            lazy_frame_with_usd_str_to_decimal,
+            columns=["Quantity"],
+            integer_type=pl.UInt16,
+        )
+        lazy_frame_with_integer_acctg_rule_cd = _convert_string_to_unsigned_integer(
+            lazy_frame_with_integer_quantity,
+            columns=["AcctgRuleCd"],
+            integer_type=pl.UInt8,
+        )
+        lazy_frame_with_reordered_columns = _reorder_columns(
+            lazy_frame_with_integer_acctg_rule_cd,
             column_names_left_to_right=["posted_date", "as_of_date"],
         )
         return lazy_frame_with_reordered_columns
@@ -95,6 +111,49 @@ def _localize_dates_in_timezone(
     lazy_frame_with_localized_dates = lazy_frame.with_columns(localized_dates)
 
     return lazy_frame_with_localized_dates
+
+
+def _convert_usd_string_to_decimal(
+    lazy_frame: pl.LazyFrame,
+    columns: list[str],
+    total_digits: int,
+    digits_after_decimal_point: int,
+) -> pl.LazyFrame:
+    """NOTE: each converted column is also renamed with a ``' (USD)'`` suffix."""
+
+    expression_to_strip_dollar_sign = pl.col(*columns).str.replace(
+        "$", "", literal=True
+    )
+
+    expression_to_cast_as_decimal = expression_to_strip_dollar_sign.cast(
+        pl.Decimal(precision=total_digits, scale=digits_after_decimal_point),
+        strict=False,
+    )
+    lazy_frame_with_decimal_amounts = lazy_frame.with_columns(
+        expression_to_cast_as_decimal
+    )
+
+    new_column_names_with_usd_suffix = {name: f"{name} (USD)" for name in columns}
+    lazy_frame_with_usd_suffixed_columns = lazy_frame_with_decimal_amounts.rename(
+        new_column_names_with_usd_suffix
+    )
+
+    return lazy_frame_with_usd_suffixed_columns
+
+
+def _convert_string_to_unsigned_integer(
+    lazy_frame: pl.LazyFrame,
+    columns: list[str],
+    integer_type: pl.DataType,
+) -> pl.LazyFrame:
+    expression_to_cast_strings_to_integers = pl.col(*columns).cast(
+        integer_type, strict=False
+    )
+    lazy_frame_with_unsigned_integer_columns = lazy_frame.with_columns(
+        expression_to_cast_strings_to_integers
+    )
+
+    return lazy_frame_with_unsigned_integer_columns
 
 
 def _reorder_columns(
