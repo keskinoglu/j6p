@@ -86,12 +86,16 @@ def _split_date_into_posted_and_as_of(
 # ---- N -> 1 fusion transformers ----
 
 
-def vertical_concat() -> Fuser:
-    """Return an N -> 1 fuser: stack the lazy frames vertically (union); all
-    must share one schema."""
+def schwab_brokerage_fuser() -> Fuser:
+    """Return the N -> 1 fuser for Schwab brokerage exports."""
 
     def fuser(lazy_frames: list[pl.LazyFrame]) -> pl.LazyFrame:
-        return pl.concat(lazy_frames)
+        stacked_lazy_frame = _stack_vertically(lazy_frames)
+        deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        sorted_lazy_frame = _sort_by_column(
+            deduped_lazy_frame, column="posted_date", descending=True
+        )
+        return sorted_lazy_frame
 
     return fuser
 
@@ -168,3 +172,19 @@ def _reorder_columns(
     )
 
     return lazy_frame_with_reordered_columns
+
+
+def _stack_vertically(lazy_frames: list[pl.LazyFrame]) -> pl.LazyFrame:
+    return pl.concat(lazy_frames)
+
+
+def _drop_duplicate_rows(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+    return lazy_frame.unique()
+
+
+def _sort_by_column(
+    lazy_frame: pl.LazyFrame,
+    column: str,
+    descending: bool,
+) -> pl.LazyFrame:
+    return lazy_frame.sort(column, descending=descending)
