@@ -1,8 +1,8 @@
-"""Loaders: the final ETL stage — return the frame, optionally persist it.
+"""Loaders: the final ETL stage — return the annotated frame, optionally persist it.
 
 A loader is the `loader` of a `LeafETL`/`NodeETL` (see `j6p.etl`). Every loader
-returns the frame so the pipeline continues; `parquet_writer` also persists it
-as a side effect, `return_only` does not.
+returns the annotated frame so the pipeline continues; `parquet_writer` also persists
+the inner lazy frame as a side effect, `return_only` does not.
 
 Each factory returns a closure named `loader` — uniform with `j6p.extractors`
 / `j6p.transformers`.
@@ -10,26 +10,26 @@ Each factory returns a closure named `loader` — uniform with `j6p.extractors`
 
 from pathlib import Path
 
-import polars as pl
-
-from j6p.type_aliases import Loader
+from j6p.datatypes import AnnotatedLazyFrame, Loader
 
 
 def return_only() -> Loader:
-    """Return the no-op loader: persist nowhere; only return the frame."""
+    """Return the no-op loader: persist nowhere; only return the annotated frame."""
 
-    def loader(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
-        return lazy_frame
+    def loader(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        return annotated_lazy_frame
 
     return loader
 
 
 def parquet_writer(path: str | Path) -> Loader:
-    """Return a loader that writes the frame to a Parquet file, then returns it."""
+    """Return a loader that writes the frame to a Parquet file, then returns
+    the annotated frame.
+    """
     p = Path(path)
 
-    def loader(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
-        lazy_frame.collect().write_parquet(p)
-        return lazy_frame
+    def loader(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        annotated_lazy_frame.lazy_frame.collect().write_parquet(p)
+        return annotated_lazy_frame
 
     return loader

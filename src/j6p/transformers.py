@@ -1,11 +1,11 @@
-"""Transformers: factories for the lazy-frame transformations injected into ETLs.
+"""Transformers: factories for annotated-lazy-frame transformations injected into ETLs.
 
 Two kinds live here, split by section:
 
-- **1 -> 1** transformers (`Transformer`): one LazyFrame -> one LazyFrame.
+- **1 -> 1** transformers (`Transformer`): AnnotatedLazyFrame -> AnnotatedLazyFrame.
   Used as a `LeafETL.transformer` (see `j6p.etl`).
-- **N -> 1** fusion transformers (`Fuser`): a list of LazyFrames -> one
-  LazyFrame — i.e. how multiple lazy frames are joined. Used as a
+- **N -> 1** fusion transformers (`Fuser`): a list of AnnotatedLazyFrames -> one
+  AnnotatedLazyFrame — i.e. how multiple annotated lazy frames are joined. Used as a
   `NodeETL.transformer`.
 
 A fuser is essentially a transformer; both are kept in this one module, the
@@ -13,18 +13,22 @@ section comments making the 1->1 vs N->1 distinction explicit. Each factory
 returns a closure named `transformer`.
 """
 
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
 import polars as pl
 
-from j6p.type_aliases import Fuser, Transformer
+from j6p.datatypes import AnnotatedLazyFrame, Fuser, Transformer
 
 # ---- 1 -> 1 transformers ----
 
 
 def identity() -> Transformer:
-    """Return the 1 -> 1 no-op: the lazy frame unchanged."""
+    """Return the 1 -> 1 no-op: the annotated lazy frame unchanged."""
 
-    def transformer(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
-        return lazy_frame
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        return annotated_lazy_frame
 
     return transformer
 
@@ -32,8 +36,15 @@ def identity() -> Transformer:
 def schwab_brokerage_transformer() -> Transformer:
     """Return the 1 -> 1 transformer for Schwab brokerage exports."""
 
-    def transformer(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
-        lazy_frame_with_split_dates = _split_date_into_posted_and_as_of(lazy_frame)
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        source_path = annotated_lazy_frame.annotations["source_path"]
+
+        lazy_frame_with_account = _add_new_schwab_account_column_from_filename(
+            annotated_lazy_frame.lazy_frame, source_path
+        )
+        lazy_frame_with_split_dates = _split_date_into_posted_and_as_of(
+            lazy_frame_with_account
+        )
         lazy_frame_with_localized_dates = _localize_dates_in_timezone(
             lazy_frame_with_split_dates,
             columns=["posted_date", "as_of_date"],
@@ -58,11 +69,24 @@ def schwab_brokerage_transformer() -> Transformer:
         )
         lazy_frame_with_reordered_columns = _reorder_columns(
             lazy_frame_with_integer_acctg_rule_cd,
-            column_names_left_to_right=["posted_date", "as_of_date"],
+            column_names_left_to_right=["posted_date", "as_of_date", "account"],
         )
-        return lazy_frame_with_reordered_columns
+
+        transformed_annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_reordered_columns,
+            annotations=annotated_lazy_frame.annotations,
+        )
+        return transformed_annotated_lazy_frame
 
     return transformer
+
+
+def _add_new_schwab_account_column_from_filename(
+    lazy_frame: pl.LazyFrame, source_path: Path
+) -> pl.LazyFrame:
+    account = source_path.name.split("_Transactions_", 1)[0]
+    lazy_frame_with_account = lazy_frame.with_columns(pl.lit(account).alias("account"))
+    return lazy_frame_with_account
 
 
 def _split_date_into_posted_and_as_of(
@@ -89,15 +113,34 @@ def _split_date_into_posted_and_as_of(
 def schwab_brokerage_fuser() -> Fuser:
     """Return the N -> 1 fuser for Schwab brokerage exports."""
 
-    def fuser(lazy_frames: list[pl.LazyFrame]) -> pl.LazyFrame:
-        stacked_lazy_frame = _stack_vertically(lazy_frames)
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        child_lazy_frames = [
+            annotated_lazy_frame.lazy_frame
+            for annotated_lazy_frame in annotated_lazy_frames
+        ]
+        stacked_lazy_frame = _stack_vertically(child_lazy_frames)
         deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
         sorted_lazy_frame = _sort_by_column(
             deduped_lazy_frame, column="posted_date", descending=True
         )
-        return sorted_lazy_frame
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=sorted_lazy_frame, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
 
     return fuser
+
+
+def _merge_annotations_from_child_frames(
+    annotated_lazy_frames: list[AnnotatedLazyFrame],
+) -> Mapping[str, Any]:
+    child_annotations = [
+        annotated_lazy_frame.annotations
+        for annotated_lazy_frame in annotated_lazy_frames
+    ]
+    return {"children": child_annotations}
 
 
 # ---- shared LazyFrame helpers ----
