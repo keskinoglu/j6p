@@ -1,4 +1,4 @@
-"""Extractors: source-specific readers that produce a single LazyFrame.
+"""Extractors: source-specific readers that produce a single AnnotatedLazyFrame.
 
 An `Extractor` is the `extractor` of a `LeafETL` (see `j6p.etl`). Extractors
 are specific to their *source*, not merely the file format, so they are grouped
@@ -10,7 +10,7 @@ from pathlib import Path
 
 import polars as pl
 
-from j6p.type_aliases import Extractor
+from j6p.datatypes import AnnotatedLazyFrame, Extractor
 
 # ---- Schwab ----
 
@@ -31,12 +31,19 @@ def schwab_json_reader(
     """
     p = Path(path)
 
-    def extractor() -> pl.LazyFrame:
+    def extractor() -> AnnotatedLazyFrame:
         if key_containing_records is None:
-            return pl.read_json(p).lazy()
-        with open(p) as f:
-            data = json.load(f)
-        return pl.DataFrame(data[key_containing_records]).lazy()
+            lazy_frame = pl.read_json(p).lazy()
+        else:
+            with open(p) as f:
+                data = json.load(f)
+            lazy_frame = pl.DataFrame(data[key_containing_records]).lazy()
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
 
     return extractor
 
@@ -49,7 +56,7 @@ def schwab_xml_reader(path: str | Path) -> Extractor:
     """
     p = Path(path)
 
-    def extractor() -> pl.LazyFrame:
+    def extractor() -> AnnotatedLazyFrame:
         raise NotImplementedError(f"schwab_xml_reader not yet implemented for {p}")
 
     return extractor
@@ -66,8 +73,14 @@ def xls_reader(path: str | Path, **kwargs) -> Extractor:
     """
     p = Path(path)
 
-    def extractor() -> pl.LazyFrame:
-        return pl.read_excel(p, **kwargs).lazy()
+    def extractor() -> AnnotatedLazyFrame:
+        lazy_frame = pl.read_excel(p, **kwargs).lazy()
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
 
     return extractor
 
@@ -76,7 +89,13 @@ def parquet_reader(path: str | Path) -> Extractor:
     """Return a reader for a previously-written Parquet file."""
     p = Path(path)
 
-    def extractor() -> pl.LazyFrame:
-        return pl.scan_parquet(p)
+    def extractor() -> AnnotatedLazyFrame:
+        lazy_frame = pl.scan_parquet(p)
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
 
     return extractor
