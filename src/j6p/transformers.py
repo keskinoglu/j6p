@@ -100,6 +100,46 @@ def _split_date_into_posted_and_as_of(
     return lazy_frame_with_original_date_dropped
 
 
+def schwab_banking_transformer() -> Transformer:
+    """Return the 1 -> 1 transformer for Schwab banking (checking) exports."""
+
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        source_path = annotated_lazy_frame.annotations["source_path"]
+
+        lazy_frame_with_account = _add_new_schwab_account_column_from_filename(
+            annotated_lazy_frame.lazy_frame, source_path
+        )
+        lazy_frame_with_localized_dates = _localize_dates_in_timezone(
+            lazy_frame_with_account,
+            columns=["Date"],
+            date_format="%m/%d/%Y",
+            timezone="America/New_York",
+        )
+        lazy_frame_with_usd_str_to_decimal = _convert_usd_string_to_decimal(
+            lazy_frame_with_localized_dates,
+            columns=["RunningBalance", "Withdrawal", "Deposit"],
+            total_digits=18,
+            digits_after_decimal_point=2,
+        )
+        lazy_frame_with_integer_check_number = _convert_string_to_unsigned_integer(
+            lazy_frame_with_usd_str_to_decimal,
+            columns=["CheckNumber"],
+            integer_type=pl.UInt32,
+        )
+        lazy_frame_with_reordered_columns = _reorder_columns(
+            lazy_frame_with_integer_check_number,
+            column_names_left_to_right=["Date", "account"],
+        )
+
+        transformed_annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_reordered_columns,
+            annotations=annotated_lazy_frame.annotations,
+        )
+        return transformed_annotated_lazy_frame
+
+    return transformer
+
+
 def _add_new_schwab_account_column_from_filename(
     lazy_frame: pl.LazyFrame, source_path: Path
 ) -> pl.LazyFrame:
