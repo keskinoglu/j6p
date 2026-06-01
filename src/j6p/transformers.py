@@ -13,6 +13,7 @@ section comments making the 1->1 vs N->1 distinction explicit. Each factory
 returns a closure named `transformer`.
 """
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -81,14 +82,6 @@ def schwab_brokerage_transformer() -> Transformer:
     return transformer
 
 
-def _add_new_schwab_account_column_from_filename(
-    lazy_frame: pl.LazyFrame, source_path: Path
-) -> pl.LazyFrame:
-    account = source_path.name.split("_Transactions_", 1)[0]
-    lazy_frame_with_account = lazy_frame.with_columns(pl.lit(account).alias("account"))
-    return lazy_frame_with_account
-
-
 def _split_date_into_posted_and_as_of(
     lazy_frame: pl.LazyFrame,
 ) -> pl.LazyFrame:
@@ -105,6 +98,14 @@ def _split_date_into_posted_and_as_of(
     )
 
     return lazy_frame_with_original_date_dropped
+
+
+def _add_new_schwab_account_column_from_filename(
+    lazy_frame: pl.LazyFrame, source_path: Path
+) -> pl.LazyFrame:
+    account = re.match(r"(.*?XXX\d+)", source_path.name).group(1)
+    lazy_frame_with_account = lazy_frame.with_columns(pl.lit(account).alias("account"))
+    return lazy_frame_with_account
 
 
 # ---- N -> 1 fusion transformers ----
@@ -168,11 +169,13 @@ def _convert_usd_string_to_decimal(
 ) -> pl.LazyFrame:
     """NOTE: each converted column is also renamed with a ``' (USD)'`` suffix."""
 
-    expression_to_strip_dollar_sign = pl.col(*columns).str.replace(
-        "$", "", literal=True
+    expression_to_strip_usd_formatting = (
+        pl.col(*columns)
+        .str.replace_all(",", "", literal=True)
+        .str.replace("$", "", literal=True)
     )
 
-    expression_to_cast_as_decimal = expression_to_strip_dollar_sign.cast(
+    expression_to_cast_as_decimal = expression_to_strip_usd_formatting.cast(
         pl.Decimal(precision=total_digits, scale=digits_after_decimal_point),
         strict=False,
     )
