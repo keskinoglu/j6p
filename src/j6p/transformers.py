@@ -148,6 +148,47 @@ def _add_new_schwab_account_column_from_filename(
     return lazy_frame_with_account
 
 
+def wise_transformer() -> Transformer:
+    """Return the 1 -> 1 transformer for Wise transaction-history exports."""
+
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        lazy_frame_with_dropped_columns = annotated_lazy_frame.lazy_frame.drop(
+            ["Batch", "Note", "Target fee amount", "Target fee currency"]
+        )
+        lazy_frame_with_localized_dates = _localize_dates_in_timezone(
+            lazy_frame_with_dropped_columns,
+            columns=["Created on", "Finished on"],
+            date_format="%Y-%m-%d %H:%M:%S",
+            timezone="UTC",
+        )
+        lazy_frame_with_decimal_amounts = _convert_decimal_string_to_decimal(
+            lazy_frame_with_localized_dates,
+            columns=[
+                "Source fee amount",
+                "Source amount (after fees)",
+                "Target amount (after fees)",
+            ],
+            total_digits=18,
+            digits_after_decimal_point=2,
+        )
+        lazy_frame_with_float_exchange_rate = _convert_string_to_float(
+            lazy_frame_with_decimal_amounts,
+            column="Exchange rate",
+        )
+        lazy_frame_with_reordered_columns = _reorder_columns(
+            lazy_frame_with_float_exchange_rate,
+            column_names_left_to_right=["Created on", "Finished on", "Direction"],
+        )
+
+        transformed_annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_reordered_columns,
+            annotations=annotated_lazy_frame.annotations,
+        )
+        return transformed_annotated_lazy_frame
+
+    return transformer
+
+
 # ---- N -> 1 fusion transformers ----
 
 
@@ -229,6 +270,37 @@ def _convert_usd_string_to_decimal(
     )
 
     return lazy_frame_with_usd_suffixed_columns
+
+
+def _convert_decimal_string_to_decimal(
+    lazy_frame: pl.LazyFrame,
+    columns: list[str],
+    total_digits: int,
+    digits_after_decimal_point: int,
+) -> pl.LazyFrame:
+    """Cast plain decimal strings (no currency symbols or thousands separators)."""
+
+    expression_to_cast_as_decimal = pl.col(*columns).cast(
+        pl.Decimal(precision=total_digits, scale=digits_after_decimal_point),
+        strict=False,
+    )
+    lazy_frame_with_decimal_amounts = lazy_frame.with_columns(
+        expression_to_cast_as_decimal
+    )
+
+    return lazy_frame_with_decimal_amounts
+
+
+def _convert_string_to_float(
+    lazy_frame: pl.LazyFrame,
+    column: str,
+) -> pl.LazyFrame:
+    expression_to_cast_string_to_float = pl.col(column).cast(pl.Float64, strict=False)
+    lazy_frame_with_float_column = lazy_frame.with_columns(
+        expression_to_cast_string_to_float
+    )
+
+    return lazy_frame_with_float_column
 
 
 def _convert_string_to_unsigned_integer(
