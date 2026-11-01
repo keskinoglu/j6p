@@ -225,6 +225,33 @@ def _merge_annotations_from_child_frames(
     return {"children": child_annotations}
 
 
+def wise_fuser() -> Fuser:
+    """Return the N -> 1 fuser for Wise transaction-history exports.
+
+    Duplicate rows are dropped on *all* columns, not on ID alone: Wise reuses an
+    ID across the currency legs of one card transaction.
+    """
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        child_lazy_frames = [
+            annotated_lazy_frame.lazy_frame
+            for annotated_lazy_frame in annotated_lazy_frames
+        ]
+        stacked_lazy_frame = _stack_vertically(child_lazy_frames)
+        deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        sorted_lazy_frame = _sort_by_column(
+            deduped_lazy_frame, column="Created on", descending=True
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=sorted_lazy_frame, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
 # ---- shared LazyFrame helpers ----
 
 
