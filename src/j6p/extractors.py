@@ -62,6 +62,33 @@ def schwab_xml_reader(path: str | Path) -> Extractor:
     return extractor
 
 
+# ---- Wise ----
+
+
+def wise_csv_reader(path: str | Path) -> Extractor:
+    """Return a reader for a Wise transaction-history CSV file.
+
+    The Wise export is a single flat CSV whose header row names the columns.
+    All values are read as strings (no type inference) so the data stays
+    exactly as exported. Empty fields become null.
+
+    Args:
+        path: Path to the Wise CSV file.
+    """
+    p = Path(path)
+
+    def extractor() -> AnnotatedLazyFrame:
+        lazy_frame = pl.read_csv(p, infer_schema=False).lazy()
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
+
+    return extractor
+
+
 # ---- Generic ----
 
 

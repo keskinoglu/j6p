@@ -1,14 +1,14 @@
 -include .env
 export
 
-.PHONY: help lint lf test tests commit cz bump
+.PHONY: help lint fix test tests commit cz bump
 
 .DEFAULT_GOAL := help
 
 help:
 	@echo "Available commands:"
 	@echo "  make lint        Check code with ruff linting and format checks"
-	@echo "  make lf          Fix code with ruff linting and formatting"
+	@echo "  make fix          Fix code with ruff linting and formatting"
 	@echo "  make test        Run the test suite with pytest"
 	@echo "  make tests       Alias for 'make test'"
 	@echo "  make commit      Run lint checks, then create a commitizen commit"
@@ -19,7 +19,7 @@ lint:
 	uv run ruff check .
 	uv run ruff format --check .
 
-lf:
+fix:
 	uv run ruff check --fix .
 	uv run ruff format .
 
