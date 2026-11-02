@@ -345,6 +345,32 @@ def wise_fuser() -> Fuser:
     return fuser
 
 
+def ing_de_fuser() -> Fuser:
+    """Return the N -> 1 fuser for ING Germany (ING-DiBa) transaction exports.
+
+    Duplicate rows are dropped on *all* columns.
+    """
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        child_lazy_frames = [
+            annotated_lazy_frame.lazy_frame
+            for annotated_lazy_frame in annotated_lazy_frames
+        ]
+        stacked_lazy_frame = _stack_vertically(child_lazy_frames)
+        deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        sorted_lazy_frame = _sort_by_column(
+            deduped_lazy_frame, column="Posting date", descending=True
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=sorted_lazy_frame, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
 # ---- shared LazyFrame helpers ----
 
 
