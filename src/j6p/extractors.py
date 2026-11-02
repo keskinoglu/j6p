@@ -89,6 +89,38 @@ def wise_csv_reader(path: str | Path) -> Extractor:
     return extractor
 
 
+# ---- ING DE ----
+
+
+def ing_de_csv_reader(path: str | Path) -> Extractor:
+    """Return a reader for an ING Germany (ING-DiBa) Umsatzanzeige CSV file.
+
+    The ING export is a semicolon-separated CSV in ISO-8859 encoding with a
+    preamble (account metadata and a disclaimer) before the header row.
+
+    Args:
+        path: Path to the ING CSV file.
+    """
+    p = Path(path)
+
+    def extractor() -> AnnotatedLazyFrame:
+        lazy_frame = pl.read_csv(
+            p,
+            separator=";",
+            infer_schema=False,
+            skip_rows=13,
+            encoding="latin-1",
+        ).lazy()
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
+
+    return extractor
+
+
 # ---- Generic ----
 
 
