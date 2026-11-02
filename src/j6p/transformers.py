@@ -79,9 +79,12 @@ def schwab_brokerage_transformer() -> Transformer:
             lazy_frame_with_integer_acctg_rule_cd,
             column_names_left_to_right=["Posting date", "As of date", "Account"],
         )
+        lazy_frame_with_occurrences = _number_repeated_rows(
+            lazy_frame_with_reordered_columns
+        )
 
         transformed_annotated_lazy_frame = AnnotatedLazyFrame(
-            lazy_frame=lazy_frame_with_reordered_columns,
+            lazy_frame=lazy_frame_with_occurrences,
             annotations=annotated_lazy_frame.annotations,
         )
         return transformed_annotated_lazy_frame
@@ -145,9 +148,12 @@ def schwab_banking_transformer() -> Transformer:
             lazy_frame_with_integer_check_number,
             column_names_left_to_right=["Posting date", "Account"],
         )
+        lazy_frame_with_occurrences = _number_repeated_rows(
+            lazy_frame_with_reordered_columns
+        )
 
         transformed_annotated_lazy_frame = AnnotatedLazyFrame(
-            lazy_frame=lazy_frame_with_reordered_columns,
+            lazy_frame=lazy_frame_with_occurrences,
             annotations=annotated_lazy_frame.annotations,
         )
         return transformed_annotated_lazy_frame
@@ -167,7 +173,12 @@ def wise_transformer() -> Transformer:
     """Return the 1 -> 1 transformer for Wise transaction-history exports."""
 
     def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
-        lazy_frame_with_dropped_columns = annotated_lazy_frame.lazy_frame.drop(
+        lazy_frame_with_settled_rows_only = _keep_rows_where_column_is_in(
+            annotated_lazy_frame.lazy_frame,
+            column="Status",
+            values=["COMPLETED", "REFUNDED"],
+        )
+        lazy_frame_with_dropped_columns = lazy_frame_with_settled_rows_only.drop(
             ["Batch", "Note", "Target fee amount", "Target fee currency"]
         )
         lazy_frame_with_localized_dates = _localize_dates_in_timezone(
@@ -194,9 +205,12 @@ def wise_transformer() -> Transformer:
             lazy_frame_with_float_exchange_rate,
             column_names_left_to_right=["Created on", "Finished on", "Direction"],
         )
+        lazy_frame_with_occurrences = _number_repeated_rows(
+            lazy_frame_with_reordered_columns
+        )
 
         transformed_annotated_lazy_frame = AnnotatedLazyFrame(
-            lazy_frame=lazy_frame_with_reordered_columns,
+            lazy_frame=lazy_frame_with_occurrences,
             annotations=annotated_lazy_frame.annotations,
         )
         return transformed_annotated_lazy_frame
@@ -259,9 +273,12 @@ def ing_de_transformer() -> Transformer:
             lazy_frame_with_decimal_amounts,
             column_names_left_to_right=["Posting date", "Value date", "Account"],
         )
+        lazy_frame_with_occurrences = _number_repeated_rows(
+            lazy_frame_with_reordered_columns
+        )
 
         transformed_annotated_lazy_frame = AnnotatedLazyFrame(
-            lazy_frame=lazy_frame_with_reordered_columns,
+            lazy_frame=lazy_frame_with_occurrences,
             annotations=annotated_lazy_frame.annotations,
         )
         return transformed_annotated_lazy_frame
@@ -282,6 +299,68 @@ def _add_new_ing_de_account_column_from_filename(
     return lazy_frame_with_account
 
 
+def citi_banking_transformer() -> Transformer:
+    """Return the 1 -> 1 transformer for Citi banking (checking) exports."""
+
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        source_path = annotated_lazy_frame.annotations["source_path"]
+
+        lazy_frame_with_cleared_rows_only = _keep_rows_where_column_is_in(
+            annotated_lazy_frame.lazy_frame, column="Status", values=["Cleared"]
+        )
+        lazy_frame_with_dropped_columns = lazy_frame_with_cleared_rows_only.drop(
+            ["Status"]
+        )
+        lazy_frame_with_consistent_column_names = _rename_columns(
+            lazy_frame_with_dropped_columns,
+            old_to_new_column_names={"Date": "Posting date"},
+        )
+        lazy_frame_with_stripped_descriptions = _strip_surrounding_whitespace(
+            lazy_frame_with_consistent_column_names, columns=["Description"]
+        )
+        lazy_frame_with_account = _add_new_citi_account_column_from_filename(
+            lazy_frame_with_stripped_descriptions, source_path
+        )
+        lazy_frame_with_localized_dates = _localize_dates_in_timezone(
+            lazy_frame_with_account,
+            columns=["Posting date"],
+            date_format="%m-%d-%Y",
+            timezone="America/New_York",
+        )
+        lazy_frame_with_usd_str_to_decimal = _convert_usd_string_to_decimal(
+            lazy_frame_with_localized_dates,
+            columns=["Debit", "Credit"],
+            total_digits=18,
+            digits_after_decimal_point=2,
+        )
+        lazy_frame_with_reordered_columns = _reorder_columns(
+            lazy_frame_with_usd_str_to_decimal,
+            column_names_left_to_right=["Posting date", "Account"],
+        )
+        lazy_frame_with_occurrences = _number_repeated_rows(
+            lazy_frame_with_reordered_columns
+        )
+
+        transformed_annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_occurrences,
+            annotations=annotated_lazy_frame.annotations,
+        )
+        return transformed_annotated_lazy_frame
+
+    return transformer
+
+
+def _add_new_citi_account_column_from_filename(
+    lazy_frame: pl.LazyFrame, source_path: Path
+) -> pl.LazyFrame:
+    account_digits = re.match(r"[A-Z]+_(\d+)_", source_path.name).group(1)
+    masked_account = f"XXX{account_digits[-3:]}"
+    lazy_frame_with_account = lazy_frame.with_columns(
+        pl.lit(masked_account).alias("Account")
+    )
+    return lazy_frame_with_account
+
+
 # ---- N -> 1 fusion transformers ----
 
 
@@ -295,8 +374,13 @@ def schwab_brokerage_fuser() -> Fuser:
         ]
         stacked_lazy_frame = _stack_vertically(child_lazy_frames)
         deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        deduped_lazy_frame_without_occurrences = deduped_lazy_frame.drop(
+            _OCCURRENCE_COLUMN
+        )
         sorted_lazy_frame = _sort_by_column(
-            deduped_lazy_frame, column="Posting date", descending=True
+            deduped_lazy_frame_without_occurrences,
+            column="Posting date",
+            descending=True,
         )
 
         merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
@@ -332,8 +416,13 @@ def wise_fuser() -> Fuser:
         ]
         stacked_lazy_frame = _stack_vertically(child_lazy_frames)
         deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        deduped_lazy_frame_without_occurrences = deduped_lazy_frame.drop(
+            _OCCURRENCE_COLUMN
+        )
         sorted_lazy_frame = _sort_by_column(
-            deduped_lazy_frame, column="Created on", descending=True
+            deduped_lazy_frame_without_occurrences,
+            column="Created on",
+            descending=True,
         )
 
         merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
@@ -358,8 +447,41 @@ def ing_de_fuser() -> Fuser:
         ]
         stacked_lazy_frame = _stack_vertically(child_lazy_frames)
         deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        deduped_lazy_frame_without_occurrences = deduped_lazy_frame.drop(
+            _OCCURRENCE_COLUMN
+        )
         sorted_lazy_frame = _sort_by_column(
-            deduped_lazy_frame, column="Posting date", descending=True
+            deduped_lazy_frame_without_occurrences,
+            column="Posting date",
+            descending=True,
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=sorted_lazy_frame, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def citi_banking_fuser() -> Fuser:
+    """Return the N -> 1 fuser for Citi banking (checking) exports."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        child_lazy_frames = [
+            annotated_lazy_frame.lazy_frame
+            for annotated_lazy_frame in annotated_lazy_frames
+        ]
+        stacked_lazy_frame = _stack_vertically(child_lazy_frames)
+        deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        deduped_lazy_frame_without_occurrences = deduped_lazy_frame.drop(
+            _OCCURRENCE_COLUMN
+        )
+        sorted_lazy_frame = _sort_by_column(
+            deduped_lazy_frame_without_occurrences,
+            column="Posting date",
+            descending=True,
         )
 
         merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
@@ -372,6 +494,22 @@ def ing_de_fuser() -> Fuser:
 
 
 # ---- shared LazyFrame helpers ----
+
+
+_OCCURRENCE_COLUMN = "_occurrence"
+
+
+def _number_repeated_rows(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+    """NOTE: adds ``_occurrence`` (0, 1, ...) so identical rows stay distinct."""
+
+    column_names = lazy_frame.collect_schema().names()
+    occurrence_of_identical_row = pl.int_range(pl.len()).over(column_names)
+
+    lazy_frame_with_occurrences = lazy_frame.with_columns(
+        occurrence_of_identical_row.alias(_OCCURRENCE_COLUMN)
+    )
+
+    return lazy_frame_with_occurrences
 
 
 def _localize_dates_in_timezone(
@@ -487,6 +625,26 @@ def _convert_string_to_unsigned_integer(
     )
 
     return lazy_frame_with_unsigned_integer_columns
+
+
+def _keep_rows_where_column_is_in(
+    lazy_frame: pl.LazyFrame,
+    column: str,
+    values: list[str],
+) -> pl.LazyFrame:
+    return lazy_frame.filter(pl.col(column).is_in(values))
+
+
+def _strip_surrounding_whitespace(
+    lazy_frame: pl.LazyFrame,
+    columns: list[str],
+) -> pl.LazyFrame:
+    expression_to_strip_whitespace = pl.col(*columns).str.strip_chars()
+    lazy_frame_with_stripped_columns = lazy_frame.with_columns(
+        expression_to_strip_whitespace
+    )
+
+    return lazy_frame_with_stripped_columns
 
 
 def _rename_columns(
