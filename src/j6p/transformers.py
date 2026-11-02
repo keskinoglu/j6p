@@ -530,7 +530,7 @@ def _stack_vertically(lazy_frames: list[pl.LazyFrame]) -> pl.LazyFrame:
 
 
 def _drop_duplicate_rows(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
-    return lazy_frame.unique()
+    return lazy_frame.unique(keep="first", maintain_order=True)
 
 
 def _sort_by_column(
@@ -538,4 +538,4 @@ def _sort_by_column(
     column: str,
     descending: bool,
 ) -> pl.LazyFrame:
-    return lazy_frame.sort(column, descending=descending)
+    return lazy_frame.sort(column, descending=descending, maintain_order=True)
