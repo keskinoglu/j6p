@@ -40,21 +40,28 @@ def schwab_brokerage_transformer() -> Transformer:
     def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
         source_path = annotated_lazy_frame.annotations["source_path"]
 
+        lazy_frame_with_spelled_out_column_names = _rename_columns(
+            annotated_lazy_frame.lazy_frame,
+            old_to_new_column_names={
+                "Fees & Comm": "Fees & commissions",
+                "AcctgRuleCd": "Accounting rule code",
+            },
+        )
         lazy_frame_with_account = _add_new_schwab_account_column_from_filename(
-            annotated_lazy_frame.lazy_frame, source_path
+            lazy_frame_with_spelled_out_column_names, source_path
         )
         lazy_frame_with_split_dates = _split_date_into_posted_and_as_of(
             lazy_frame_with_account
         )
         lazy_frame_with_localized_dates = _localize_dates_in_timezone(
             lazy_frame_with_split_dates,
-            columns=["posted_date", "as_of_date"],
+            columns=["Posting date", "As of date"],
             date_format="%m/%d/%Y",
             timezone="America/New_York",
         )
         lazy_frame_with_usd_str_to_decimal = _convert_usd_string_to_decimal(
             lazy_frame_with_localized_dates,
-            columns=["Price", "Fees & Comm", "Amount"],
+            columns=["Price", "Fees & commissions", "Amount"],
             total_digits=18,
             digits_after_decimal_point=4,
         )
@@ -65,12 +72,12 @@ def schwab_brokerage_transformer() -> Transformer:
         )
         lazy_frame_with_integer_acctg_rule_cd = _convert_string_to_unsigned_integer(
             lazy_frame_with_integer_quantity,
-            columns=["AcctgRuleCd"],
+            columns=["Accounting rule code"],
             integer_type=pl.UInt8,
         )
         lazy_frame_with_reordered_columns = _reorder_columns(
             lazy_frame_with_integer_acctg_rule_cd,
-            column_names_left_to_right=["posted_date", "as_of_date", "account"],
+            column_names_left_to_right=["Posting date", "As of date", "Account"],
         )
 
         transformed_annotated_lazy_frame = AnnotatedLazyFrame(
@@ -90,8 +97,8 @@ def _split_date_into_posted_and_as_of(
     as_of_date = date_parts.struct.field("field_1").fill_null(posted_date)
 
     lazy_frame_with_split_date_columns = lazy_frame.with_columns(
-        posted_date.alias("posted_date"),
-        as_of_date.alias("as_of_date"),
+        posted_date.alias("Posting date"),
+        as_of_date.alias("As of date"),
     )
     lazy_frame_with_original_date_dropped = lazy_frame_with_split_date_columns.drop(
         "Date"
@@ -106,29 +113,37 @@ def schwab_banking_transformer() -> Transformer:
     def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
         source_path = annotated_lazy_frame.annotations["source_path"]
 
+        lazy_frame_with_consistent_column_names = _rename_columns(
+            annotated_lazy_frame.lazy_frame,
+            old_to_new_column_names={
+                "Date": "Posting date",
+                "RunningBalance": "Balance",
+                "CheckNumber": "Check number",
+            },
+        )
         lazy_frame_with_account = _add_new_schwab_account_column_from_filename(
-            annotated_lazy_frame.lazy_frame, source_path
+            lazy_frame_with_consistent_column_names, source_path
         )
         lazy_frame_with_localized_dates = _localize_dates_in_timezone(
             lazy_frame_with_account,
-            columns=["Date"],
+            columns=["Posting date"],
             date_format="%m/%d/%Y",
             timezone="America/New_York",
         )
         lazy_frame_with_usd_str_to_decimal = _convert_usd_string_to_decimal(
             lazy_frame_with_localized_dates,
-            columns=["RunningBalance", "Withdrawal", "Deposit"],
+            columns=["Balance", "Withdrawal", "Deposit"],
             total_digits=18,
             digits_after_decimal_point=2,
         )
         lazy_frame_with_integer_check_number = _convert_string_to_unsigned_integer(
             lazy_frame_with_usd_str_to_decimal,
-            columns=["CheckNumber"],
+            columns=["Check number"],
             integer_type=pl.UInt32,
         )
         lazy_frame_with_reordered_columns = _reorder_columns(
             lazy_frame_with_integer_check_number,
-            column_names_left_to_right=["Date", "account"],
+            column_names_left_to_right=["Posting date", "Account"],
         )
 
         transformed_annotated_lazy_frame = AnnotatedLazyFrame(
@@ -144,7 +159,7 @@ def _add_new_schwab_account_column_from_filename(
     lazy_frame: pl.LazyFrame, source_path: Path
 ) -> pl.LazyFrame:
     account = re.match(r"(.*?XXX\d+)", source_path.name).group(1)
-    lazy_frame_with_account = lazy_frame.with_columns(pl.lit(account).alias("account"))
+    lazy_frame_with_account = lazy_frame.with_columns(pl.lit(account).alias("Account"))
     return lazy_frame_with_account
 
 
@@ -189,6 +204,84 @@ def wise_transformer() -> Transformer:
     return transformer
 
 
+def ing_de_transformer() -> Transformer:
+    """Return the 1 -> 1 transformer for ING Germany (ING-DiBa) transaction exports."""
+
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        source_path = annotated_lazy_frame.annotations["source_path"]
+
+        lazy_frame_with_dropped_columns = annotated_lazy_frame.lazy_frame.drop(
+            ["Währung", "Währung_duplicated_0"]
+        )
+        lazy_frame_with_english_column_names = _rename_columns(
+            lazy_frame_with_dropped_columns,
+            old_to_new_column_names={
+                "Buchung": "Posting date",
+                "Wertstellungsdatum": "Value date",
+                "Auftraggeber/Empfänger": "Payer/Payee",
+                "Buchungstext": "Transaction type",
+                "Verwendungszweck": "Description",
+                "Referenz": "Reference",
+                "Saldo": "Balance (EUR)",
+                "Betrag": "Amount (EUR)",
+            },
+        )
+        lazy_frame_with_english_transaction_types = _replace_column_values(
+            lazy_frame_with_english_column_names,
+            column="Transaction type",
+            old_to_new_values={
+                "Lastschrift": "Direct debit",
+                "Gutschrift": "Credit",
+                "Gutschrift Echtzeitüberweisung": "Instant transfer credit",
+                "Echtzeitüberweisung": "Instant transfer",
+                "Dauerauftrag / Terminueberweisung": "Standing/Scheduled transfer",
+                "Gehalt/Rente": "Salary/Pension",
+            },
+        )
+        lazy_frame_with_account = _add_new_ing_de_account_column_from_filename(
+            lazy_frame_with_english_transaction_types, source_path
+        )
+        lazy_frame_with_localized_dates = _localize_dates_in_timezone(
+            lazy_frame_with_account,
+            columns=["Posting date", "Value date"],
+            date_format="%d.%m.%Y",
+            timezone="Europe/Berlin",
+        )
+        lazy_frame_with_decimal_amounts = (
+            _convert_european_decimal_string_to_us_decimal(
+                lazy_frame_with_localized_dates,
+                columns=["Balance (EUR)", "Amount (EUR)"],
+                total_digits=18,
+                digits_after_decimal_point=2,
+            )
+        )
+        lazy_frame_with_reordered_columns = _reorder_columns(
+            lazy_frame_with_decimal_amounts,
+            column_names_left_to_right=["Posting date", "Value date", "Account"],
+        )
+
+        transformed_annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_reordered_columns,
+            annotations=annotated_lazy_frame.annotations,
+        )
+        return transformed_annotated_lazy_frame
+
+    return transformer
+
+
+def _add_new_ing_de_account_column_from_filename(
+    lazy_frame: pl.LazyFrame, source_path: Path
+) -> pl.LazyFrame:
+    """NOTE: the IBAN is masked to its last 3 digits, matching Schwab's ``XXX784``."""
+
+    iban = re.match(r"Umsatzanzeige_([A-Z]{2}\d+)_", source_path.name).group(1)
+    masked_account = f"XXX{iban[-3:]}"
+    lazy_frame_with_account = lazy_frame.with_columns(
+        pl.lit(masked_account).alias("Account")
+    )
+    return lazy_frame_with_account
+
+
 # ---- N -> 1 fusion transformers ----
 
 
@@ -203,7 +296,7 @@ def schwab_brokerage_fuser() -> Fuser:
         stacked_lazy_frame = _stack_vertically(child_lazy_frames)
         deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
         sorted_lazy_frame = _sort_by_column(
-            deduped_lazy_frame, column="posted_date", descending=True
+            deduped_lazy_frame, column="Posting date", descending=True
         )
 
         merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
@@ -318,6 +411,31 @@ def _convert_decimal_string_to_decimal(
     return lazy_frame_with_decimal_amounts
 
 
+def _convert_european_decimal_string_to_us_decimal(
+    lazy_frame: pl.LazyFrame,
+    columns: list[str],
+    total_digits: int,
+    digits_after_decimal_point: int,
+) -> pl.LazyFrame:
+    """Cast European-formatted strings (``.`` thousands, ``,`` decimal) to Decimal."""
+
+    expression_to_convert_european_to_us_format = (
+        pl.col(*columns)
+        .str.replace_all(".", "", literal=True)
+        .str.replace(",", ".", literal=True)
+    )
+
+    expression_to_cast_as_decimal = expression_to_convert_european_to_us_format.cast(
+        pl.Decimal(precision=total_digits, scale=digits_after_decimal_point),
+        strict=False,
+    )
+    lazy_frame_with_decimal_amounts = lazy_frame.with_columns(
+        expression_to_cast_as_decimal
+    )
+
+    return lazy_frame_with_decimal_amounts
+
+
 def _convert_string_to_float(
     lazy_frame: pl.LazyFrame,
     column: str,
@@ -343,6 +461,28 @@ def _convert_string_to_unsigned_integer(
     )
 
     return lazy_frame_with_unsigned_integer_columns
+
+
+def _rename_columns(
+    lazy_frame: pl.LazyFrame,
+    old_to_new_column_names: Mapping[str, str],
+) -> pl.LazyFrame:
+    return lazy_frame.rename(old_to_new_column_names)
+
+
+def _replace_column_values(
+    lazy_frame: pl.LazyFrame,
+    column: str,
+    old_to_new_values: Mapping[str, str],
+) -> pl.LazyFrame:
+    """NOTE: values missing from ``old_to_new_values`` are kept unchanged."""
+
+    expression_to_replace_values = pl.col(column).replace(old_to_new_values)
+    lazy_frame_with_replaced_values = lazy_frame.with_columns(
+        expression_to_replace_values
+    )
+
+    return lazy_frame_with_replaced_values
 
 
 def _reorder_columns(
