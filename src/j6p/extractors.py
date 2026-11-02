@@ -121,6 +121,34 @@ def ing_de_csv_reader(path: str | Path) -> Extractor:
     return extractor
 
 
+# ---- Citi ----
+
+
+def citi_banking_csv_reader(path: str | Path) -> Extractor:
+    """Return a reader for a Citi banking (checking) transaction CSV file.
+
+    Every data row ends with a trailing comma that the header lacks, so the
+    resulting empty extra field is truncated.
+
+    Args:
+        path: Path to the Citi CSV file.
+    """
+    p = Path(path)
+
+    def extractor() -> AnnotatedLazyFrame:
+        lazy_frame = pl.read_csv(
+            p, infer_schema=False, truncate_ragged_lines=True
+        ).lazy()
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
+
+    return extractor
+
+
 # ---- Generic ----
 
 
