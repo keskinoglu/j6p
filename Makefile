@@ -1,7 +1,6 @@
--include .env
 export
 
-.PHONY: help lint fix test tests commit cz bump
+.PHONY: help lint fix test tests secrets commit cz bump
 
 .DEFAULT_GOAL := help
 
@@ -11,6 +10,7 @@ help:
 	@echo "  make fix          Fix code with ruff linting and formatting"
 	@echo "  make test        Run the test suite with pytest"
 	@echo "  make tests       Alias for 'make test'"
+	@echo "  make secrets     Scan tracked files and git history for secrets and sensitive data"
 	@echo "  make commit      Run lint checks, then create a commitizen commit"
 	@echo "  make cz          Alias for 'make commit'"
 	@echo "  make bump        Bump version, update CHANGELOG, and tag via commitizen"
@@ -25,6 +25,11 @@ fix:
 
 test tests:
 	uv run pytest
+
+secrets:
+	uv run pre-commit run --all-files
+	uv run pre-commit run --hook-stage manual gitleaks-history
+	uv run pre-commit run --hook-stage manual check-sensitive-data-history
 
 commit: lint
 	uv run cz commit

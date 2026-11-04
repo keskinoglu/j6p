@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-license = {text = "MIT"}
+license = "GPL-3.0-only"
 dependencies = [
     "polars>=1.40.1",
     "xlsxwriter>=3.3.1",
@@ -19,6 +19,7 @@ dev = [
     "ipykernel",
     "pandas>=3.0.3",
     "pyarrow>=24.0.0",
+    "pre-commit>=4.7.0",
 ]
 
 [tool.ruff]
