@@ -402,6 +402,34 @@ def _merge_annotations_from_child_frames(
     return {"children": child_annotations}
 
 
+def schwab_banking_fuser() -> Fuser:
+    """Return the N -> 1 fuser for Schwab banking (checking) exports."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        child_lazy_frames = [
+            annotated_lazy_frame.lazy_frame
+            for annotated_lazy_frame in annotated_lazy_frames
+        ]
+        stacked_lazy_frame = _stack_vertically(child_lazy_frames)
+        deduped_lazy_frame = _drop_duplicate_rows(stacked_lazy_frame)
+        deduped_lazy_frame_without_occurrences = deduped_lazy_frame.drop(
+            _OCCURRENCE_COLUMN
+        )
+        sorted_lazy_frame = _sort_by_column(
+            deduped_lazy_frame_without_occurrences,
+            column="Posting date",
+            descending=True,
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=sorted_lazy_frame, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
 def wise_fuser() -> Fuser:
     """Return the N -> 1 fuser for Wise transaction-history exports.
 
