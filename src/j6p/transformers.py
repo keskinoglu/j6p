@@ -361,6 +361,78 @@ def _add_new_citi_account_column_from_filename(
     return lazy_frame_with_account
 
 
+def citi_banking_known_balance_transformer() -> Transformer:
+    """Return the 1 -> 1 transformer for the Citi rows of a known-balances CSV."""
+
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        lazy_frame_with_citi_rows_only = _keep_rows_where_column_is_in(
+            annotated_lazy_frame.lazy_frame, column="Institution", values=["Citi"]
+        )
+        lazy_frame_with_known_balances = _convert_known_balances_to_typed_columns(
+            lazy_frame_with_citi_rows_only
+        )
+        lazy_frame_with_citi_columns = lazy_frame_with_known_balances.select(
+            pl.col("Account"),
+            pl.col("Known balance date"),
+            pl.col("Known balance").alias("Known balance (USD)"),
+        )
+
+        transformed_annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_citi_columns,
+            annotations=annotated_lazy_frame.annotations,
+        )
+        return transformed_annotated_lazy_frame
+
+    return transformer
+
+
+def wise_known_balances_transformer() -> Transformer:
+    """Return the 1 -> 1 transformer for the Wise rows of a known-balances CSV."""
+
+    def transformer(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        lazy_frame_with_wise_rows_only = _keep_rows_where_column_is_in(
+            annotated_lazy_frame.lazy_frame, column="Institution", values=["Wise"]
+        )
+        lazy_frame_with_known_balances = _convert_known_balances_to_typed_columns(
+            lazy_frame_with_wise_rows_only
+        )
+        lazy_frame_with_wise_columns = lazy_frame_with_known_balances.select(
+            pl.col("Currency"),
+            pl.col("Known balance date"),
+            pl.col("Known balance"),
+        )
+
+        transformed_annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_wise_columns,
+            annotations=annotated_lazy_frame.annotations,
+        )
+        return transformed_annotated_lazy_frame
+
+    return transformer
+
+
+def _convert_known_balances_to_typed_columns(
+    lazy_frame: pl.LazyFrame,
+) -> pl.LazyFrame:
+    lazy_frame_with_consistent_column_names = _rename_columns(
+        lazy_frame,
+        old_to_new_column_names={
+            "Date": "Known balance date",
+            "Balance": "Known balance",
+        },
+    )
+    lazy_frame_with_dates = _parse_dates_in_iso_us_or_german_format(
+        lazy_frame_with_consistent_column_names, columns=["Known balance date"]
+    )
+    lazy_frame_with_decimal_balances = _convert_decimal_string_to_decimal(
+        lazy_frame_with_dates,
+        columns=["Known balance"],
+        total_digits=18,
+        digits_after_decimal_point=2,
+    )
+    return lazy_frame_with_decimal_balances
+
+
 # ---- N -> 1 fusion transformers ----
 
 
@@ -521,6 +593,323 @@ def citi_banking_fuser() -> Fuser:
     return fuser
 
 
+def citi_banking_balance_fuser() -> Fuser:
+    """Return the fuser that adds a running balance to Citi from its known balance."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        (citi_banking, citi_known_balance) = annotated_lazy_frames
+
+        lazy_frame_with_balances = _add_running_balance_from_known_balance(
+            citi_banking.lazy_frame,
+            known_balances=citi_known_balance.lazy_frame,
+            amount=pl.coalesce("Debit (USD)", "Credit (USD)"),
+            date_column="Posting date",
+            account_columns=["Account"],
+            known_balance_column="Known balance (USD)",
+            balance_column="Balance (USD)",
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_balances, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def wise_balance_fuser() -> Fuser:
+    """Return the fuser that splits Wise into currency legs with running balances."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        (wise, wise_known_balances) = annotated_lazy_frames
+
+        lazy_frame_without_jar_moves = _drop_wise_moves_between_jars(wise.lazy_frame)
+        lazy_frame_as_currency_legs = _split_wise_rows_into_currency_legs(
+            lazy_frame_without_jar_moves
+        )
+        sorted_lazy_frame = _sort_by_column(
+            lazy_frame_as_currency_legs, column="Finished on", descending=True
+        )
+        lazy_frame_with_balances = _add_running_balance_from_known_balance(
+            sorted_lazy_frame,
+            known_balances=wise_known_balances.lazy_frame,
+            amount=pl.col("Amount"),
+            date_column="Finished on",
+            account_columns=["Currency"],
+            known_balance_column="Known balance",
+            balance_column="Balance",
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_balances, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def _drop_wise_moves_between_jars(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+    is_move_between_jars = (pl.col("Direction") == "NEUTRAL") & (
+        pl.col("Source currency") == pl.col("Target currency")
+    )
+    return lazy_frame.filter(~is_move_between_jars)
+
+
+def _split_wise_rows_into_currency_legs(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+    """NOTE: a conversion (NEUTRAL) yields two legs; the source fee leaves with the
+    source amount, since Wise deducts it before converting."""
+
+    money_leaving_source_currency = lazy_frame.filter(
+        pl.col("Direction").is_in(["OUT", "NEUTRAL"])
+    ).with_columns(
+        pl.col("Source currency").alias("Currency"),
+        (
+            -(
+                pl.col("Source amount (after fees)")
+                + pl.col("Source fee amount").fill_null(0)
+            )
+        ).alias("Amount"),
+    )
+    money_arriving_in_target_currency = lazy_frame.filter(
+        pl.col("Direction").is_in(["IN", "NEUTRAL"])
+    ).with_columns(
+        pl.col("Target currency").alias("Currency"),
+        pl.col("Target amount (after fees)").alias("Amount"),
+    )
+
+    lazy_frame_as_currency_legs = _stack_vertically(
+        [money_leaving_source_currency, money_arriving_in_target_currency]
+    )
+    return lazy_frame_as_currency_legs
+
+
+def schwab_banking_ledger_entries_fuser() -> Fuser:
+    """Return the fuser that turns fused Schwab checking into ledger entries."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        (schwab_banking,) = annotated_lazy_frames
+
+        lazy_frame_as_ledger_entries = _select_ledger_entry_columns(
+            schwab_banking.lazy_frame,
+            posting_date=pl.col("Posting date"),
+            institution=pl.lit("Schwab"),
+            account=pl.col("Account"),
+            currency=pl.lit("USD"),
+            amount=pl.col("Deposit (USD)").fill_null(0)
+            - pl.col("Withdrawal (USD)").fill_null(0),
+            balance=pl.col("Balance (USD)"),
+            counterparty=pl.col("Description"),
+            description=pl.col("Description"),
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_as_ledger_entries, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def ing_de_ledger_entries_fuser() -> Fuser:
+    """Return the fuser that turns fused ING Germany exports into ledger entries."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        (ing_de,) = annotated_lazy_frames
+
+        lazy_frame_as_ledger_entries = _select_ledger_entry_columns(
+            ing_de.lazy_frame,
+            posting_date=pl.col("Posting date"),
+            institution=pl.lit("ING"),
+            account=pl.col("Account"),
+            currency=pl.lit("EUR"),
+            amount=pl.col("Amount (EUR)"),
+            balance=pl.col("Balance (EUR)"),
+            counterparty=pl.col("Payer/Payee"),
+            description=pl.col("Description"),
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_as_ledger_entries, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def citi_banking_ledger_entries_fuser() -> Fuser:
+    """Return the fuser that turns Citi checking with balances into ledger entries."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        (citi_banking_with_balance,) = annotated_lazy_frames
+
+        lazy_frame_as_ledger_entries = _select_ledger_entry_columns(
+            citi_banking_with_balance.lazy_frame,
+            posting_date=pl.col("Posting date"),
+            institution=pl.lit("Citi"),
+            account=pl.col("Account"),
+            currency=pl.lit("USD"),
+            amount=pl.coalesce("Debit (USD)", "Credit (USD)"),
+            balance=pl.col("Balance (USD)"),
+            counterparty=pl.col("Description"),
+            description=pl.col("Description"),
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_as_ledger_entries, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def wise_ledger_entries_fuser() -> Fuser:
+    """Return the fuser that turns Wise currency legs into ledger entries."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        (wise_with_balance,) = annotated_lazy_frames
+
+        counterparty_of_the_leg = (
+            pl.when(pl.col("Direction") == "IN")
+            .then(pl.col("Source name"))
+            .otherwise(pl.col("Target name"))
+        )
+        lazy_frame_as_ledger_entries = _select_ledger_entry_columns(
+            wise_with_balance.lazy_frame,
+            posting_date=pl.col("Finished on"),
+            institution=pl.lit("Wise"),
+            account=pl.lit(None),
+            currency=pl.col("Currency"),
+            amount=pl.col("Amount"),
+            balance=pl.col("Balance"),
+            counterparty=counterparty_of_the_leg,
+            description=pl.col("Reference"),
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_as_ledger_entries, annotations=merged_annotations
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def _select_ledger_entry_columns(
+    lazy_frame: pl.LazyFrame,
+    *,
+    posting_date: pl.Expr,
+    institution: pl.Expr,
+    account: pl.Expr,
+    currency: pl.Expr,
+    amount: pl.Expr,
+    balance: pl.Expr,
+    counterparty: pl.Expr,
+    description: pl.Expr,
+) -> pl.LazyFrame:
+    """NOTE: every bank is cast to the same dtypes, and dates to UTC, so that
+    the ledger can stack them."""
+
+    money = pl.Decimal(precision=18, scale=2)
+    lazy_frame_as_ledger_entries = lazy_frame.select(
+        posting_date.dt.convert_time_zone("UTC").alias("Posting date"),
+        institution.cast(pl.String).alias("Institution"),
+        account.cast(pl.String).alias("Account"),
+        currency.cast(pl.String).alias("Currency"),
+        amount.cast(money).alias("Amount"),
+        balance.cast(money).alias("Balance"),
+        counterparty.cast(pl.String).alias("Counterparty"),
+        description.cast(pl.String).alias("Description"),
+    )
+    return lazy_frame_as_ledger_entries
+
+
+def ledger_fuser(internal_counterparties: list[str]) -> Fuser:
+    """Return the fuser that books every bank's ledger entries into one ledger."""
+
+    def fuser(annotated_lazy_frames: list[AnnotatedLazyFrame]) -> AnnotatedLazyFrame:
+        child_lazy_frames = [
+            annotated_lazy_frame.lazy_frame
+            for annotated_lazy_frame in annotated_lazy_frames
+        ]
+        stacked_lazy_frame = _stack_vertically(child_lazy_frames)
+        sorted_lazy_frame = _sort_by_column(
+            stacked_lazy_frame, column="Posting date", descending=True
+        )
+        lazy_frame_with_transfers = _classify_transfers_by_counterparty(
+            sorted_lazy_frame, internal_counterparties=internal_counterparties
+        )
+        lazy_frame_with_combined_balances = _add_combined_balance_per_currency(
+            lazy_frame_with_transfers
+        )
+
+        merged_annotations = _merge_annotations_from_child_frames(annotated_lazy_frames)
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame_with_combined_balances,
+            annotations=merged_annotations,
+        )
+        return annotated_lazy_frame
+
+    return fuser
+
+
+def _classify_transfers_by_counterparty(
+    lazy_frame: pl.LazyFrame, internal_counterparties: list[str]
+) -> pl.LazyFrame:
+    is_internal_counterparty = pl.col("Counterparty").str.contains_any(
+        internal_counterparties, ascii_case_insensitive=True
+    )
+    transfer = (
+        pl.when(is_internal_counterparty)
+        .then(pl.lit("Internal"))
+        .otherwise(pl.lit("External"))
+    )
+    return lazy_frame.with_columns(transfer.alias("Transfer"))
+
+
+def _add_combined_balance_per_currency(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+    """NOTE: expects newest first. The combined balance is every account's balance
+    before its oldest entry, plus all entries up to this row, per currency."""
+
+    account_columns = ["Institution", "Account", "Currency"]
+    balance_before_oldest_entry = (
+        lazy_frame.group_by(account_columns)
+        .agg((pl.col("Balance") - pl.col("Amount")).last().alias("_starting_balance"))
+        .group_by("Currency")
+        .agg(pl.col("_starting_balance").sum().alias("_combined_starting_balance"))
+    )
+    lazy_frame_with_starting_balances = lazy_frame.join(
+        balance_before_oldest_entry, on="Currency", how="left", maintain_order="left"
+    )
+
+    running_total_per_currency = pl.col("Amount").cum_sum(reverse=True).over("Currency")
+    combined_balance = (
+        pl.col("_combined_starting_balance") + running_total_per_currency
+    ).cast(pl.Decimal(precision=18, scale=2))
+    lazy_frame_with_combined_balances = lazy_frame_with_starting_balances.with_columns(
+        combined_balance.alias("Combined balance")
+    ).drop("_combined_starting_balance")
+
+    lazy_frame_with_reordered_columns = _reorder_columns(
+        lazy_frame_with_combined_balances,
+        column_names_left_to_right=[
+            "Posting date",
+            "Institution",
+            "Account",
+            "Currency",
+            "Amount",
+            "Balance",
+            "Combined balance",
+            "Transfer",
+        ],
+    )
+    return lazy_frame_with_reordered_columns
+
+
 # ---- shared LazyFrame helpers ----
 
 
@@ -552,6 +941,71 @@ def _localize_dates_in_timezone(
     lazy_frame_with_localized_dates = lazy_frame.with_columns(localized_dates)
 
     return lazy_frame_with_localized_dates
+
+
+def _parse_dates_in_iso_us_or_german_format(
+    lazy_frame: pl.LazyFrame, columns: list[str]
+) -> pl.LazyFrame:
+    """NOTE: accepts 2026-11-05, 11/5/2026 and 5.11.2026, so a spreadsheet
+    editor's rewrite of the date still parses."""
+
+    date_formats = ["%Y-%m-%d", "%m/%d/%Y", "%d.%m.%Y"]
+    parsed_dates = [
+        pl.coalesce(
+            pl.col(column).str.to_date(date_format, strict=False)
+            for date_format in date_formats
+        ).alias(column)
+        for column in columns
+    ]
+    return lazy_frame.with_columns(parsed_dates)
+
+
+def _add_running_balance_from_known_balance(
+    lazy_frame: pl.LazyFrame,
+    *,
+    known_balances: pl.LazyFrame,
+    amount: pl.Expr,
+    date_column: str,
+    account_columns: list[str],
+    known_balance_column: str,
+    balance_column: str,
+) -> pl.LazyFrame:
+    """NOTE: expects newest first. The balance after each row is worked out
+    backwards and forwards from the known balance on its date; an account with no
+    known balance is taken to hold 0 after its newest row."""
+
+    latest_known_balances = known_balances.sort("Known balance date").unique(
+        subset=account_columns, keep="last"
+    )
+    lazy_frame_with_known_balances = lazy_frame.join(
+        latest_known_balances,
+        on=account_columns,
+        how="left",
+        maintain_order="left",
+    )
+
+    amount_or_zero = amount.fill_null(0)
+    is_on_or_before_known_date = pl.col("Known balance date").is_null() | (
+        pl.col(date_column).dt.date() <= pl.col("Known balance date")
+    )
+    total_through_known_date = (
+        pl.when(is_on_or_before_known_date)
+        .then(amount_or_zero)
+        .otherwise(0)
+        .sum()
+        .over(account_columns)
+    )
+    running_total = amount_or_zero.cum_sum(reverse=True).over(account_columns)
+    balance = (
+        pl.col(known_balance_column).fill_null(0)
+        - total_through_known_date
+        + running_total
+    ).cast(pl.Decimal(precision=18, scale=2))
+
+    lazy_frame_with_balances = lazy_frame_with_known_balances.with_columns(
+        balance.alias(balance_column)
+    ).drop("Known balance date", known_balance_column)
+    return lazy_frame_with_balances
 
 
 def _convert_usd_string_to_decimal(

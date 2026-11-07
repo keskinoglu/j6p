@@ -149,6 +149,25 @@ def citi_banking_csv_reader(path: str | Path) -> Extractor:
     return extractor
 
 
+# ---- Known balances ----
+
+
+def known_balances_csv_reader(path: str | Path) -> Extractor:
+    """Return a reader for a known-balances CSV (see templates/opening_balances.csv)."""
+    p = Path(path)
+
+    def extractor() -> AnnotatedLazyFrame:
+        lazy_frame = pl.scan_csv(p, infer_schema=False, comment_prefix="#")
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
+
+    return extractor
+
+
 # ---- Generic ----
 
 

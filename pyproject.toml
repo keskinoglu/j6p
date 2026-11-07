@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = "GPL-3.0-only"
 dependencies = [
-    "polars>=1.40.1",
+    "polars>=2.1.0",
     "xlsxwriter>=3.3.1",
 ]
 

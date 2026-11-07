@@ -1,0 +1,6 @@
+Date,Institution,Account,Currency,Balance
+# Citi account: XXX + last 3 digits of the export's file name (CHK_1234_... -> XXX234),,,,
+# Wise account: blank, one row per currency,,,
+# 2025-12-31,Citi,XXX234,USD,1234.56
+# 2025-12-31,Wise,,EUR,500
+### Fill Below ###,,,,
