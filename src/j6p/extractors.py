@@ -127,11 +127,14 @@ def wise_csv_reader(path: str | Path) -> Extractor:
 # ---- ING DE ----
 
 
+_ING_DE_HEADER_PREFIX = "Buchung;"
+
+
 def ing_de_csv_reader(path: str | Path) -> Extractor:
     """Return a reader for an ING Germany (ING-DiBa) Umsatzanzeige CSV file.
 
-    The ING export is a semicolon-separated CSV in ISO-8859 encoding with a
-    preamble (account metadata and a disclaimer) before the header row.
+    The export is a semicolon-separated, ISO-8859 CSV whose header row follows
+    a preamble of varying length.
 
     Args:
         path: Path to the ING CSV file.
@@ -143,7 +146,7 @@ def ing_de_csv_reader(path: str | Path) -> Extractor:
             p,
             separator=";",
             infer_schema=False,
-            skip_rows=13,
+            skip_rows=_count_lines_before_ing_de_header(p),
             encoding="latin-1",
         ).lazy()
 
@@ -154,6 +157,14 @@ def ing_de_csv_reader(path: str | Path) -> Extractor:
         return annotated_lazy_frame
 
     return extractor
+
+
+def _count_lines_before_ing_de_header(path: Path) -> int:
+    with open(path, encoding="latin-1") as f:
+        for line_index, line in enumerate(f):
+            if line.startswith(_ING_DE_HEADER_PREFIX):
+                return line_index
+    raise ValueError(f"No ING header row starting with {_ING_DE_HEADER_PREFIX!r}")
 
 
 # ---- Citi ----
@@ -188,11 +199,35 @@ def citi_banking_csv_reader(path: str | Path) -> Extractor:
 
 
 def known_balances_csv_reader(path: str | Path) -> Extractor:
-    """Return a reader for a known-balances CSV (see templates/opening_balances.csv)."""
+    """Return a reader for a known-balances CSV (see templates/known_balances.csv)."""
     p = Path(path)
 
     def extractor() -> AnnotatedLazyFrame:
         lazy_frame = pl.scan_csv(p, infer_schema=False, comment_prefix="#")
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
+
+    return extractor
+
+
+# ---- Internal counterparties ----
+
+
+def internal_counterparties_txt_reader(path: str | Path) -> Extractor:
+    """Return a reader for an internal-counterparties TXT file (see templates/)."""
+    p = Path(path)
+
+    def extractor() -> AnnotatedLazyFrame:
+        with open(p, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        names = [line for line in lines if not line.startswith("#")]
+        lazy_frame = pl.LazyFrame(
+            {"Counterparty": names}, schema={"Counterparty": pl.String}
+        )
 
         annotations = {"source_path": p}
         annotated_lazy_frame = AnnotatedLazyFrame(

@@ -38,6 +38,21 @@ def parquet_writer(path: str | Path) -> Loader:
     return loader
 
 
+def csv_writer(path: str | Path) -> Loader:
+    """Return a loader that writes the frame to a CSV file in local wall time."""
+    p = Path(path)
+
+    def loader(annotated_lazy_frame: AnnotatedLazyFrame) -> AnnotatedLazyFrame:
+        timezone_aware_datetimes = cs.datetime(time_zone="*")
+        lazy_frame_without_time_zones = annotated_lazy_frame.lazy_frame.with_columns(
+            timezone_aware_datetimes.dt.replace_time_zone(None)
+        )
+        lazy_frame_without_time_zones.collect().write_csv(p)
+        return annotated_lazy_frame
+
+    return loader
+
+
 def xlsx_writer(path: str | Path) -> Loader:
     """Return a loader that writes the frame to an xlsx file in local wall time."""
     p = Path(path)

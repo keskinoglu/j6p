@@ -1,0 +1,12 @@
+Date,Institution,Account,Currency,Balance
+# Each row is an account's balance at the END of that day (local time) - e.g. from a statement.,,,,
+# Newer known balances are trusted most; where an older one disagrees an Adjustment entry is added.,,,,
+# A row here wins over the bank's own reported balance on the same day.,,,,
+# Institution: Schwab / ING / Citi / Wise,,,,
+# Schwab account: the export file name up to XXX + digits (Schwab_Checking_XXX123_... -> Schwab_Checking_XXX123),,,,
+# ING account: XXX + last 3 digits of the IBAN in the export's file name,,,,
+# Citi account: XXX + last 3 digits of the export's file name (CHK_1234_... -> XXX234),,,,
+# Wise account: blank - one row per currency,,,,
+# 2025-12-31,Citi,XXX234,USD,1234.56
+# 2025-12-31,Wise,,EUR,500
+### Fill Below ###,,,,
