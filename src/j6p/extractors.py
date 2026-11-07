@@ -48,6 +48,41 @@ def schwab_json_reader(
     return extractor
 
 
+_SCHWAB_BANKING_JSON_COLUMN_ORDER = [
+    "CheckNumber",
+    "Description",
+    "Date",
+    "RunningBalance",
+    "Withdrawal",
+    "Deposit",
+    "Type",
+]
+
+
+def schwab_banking_csv_reader(path: str | Path) -> Extractor:
+    """Return a Schwab banking CSV reader shaped like the PostedTransactions JSON."""
+    p = Path(path)
+
+    def extractor() -> AnnotatedLazyFrame:
+        lazy_frame = (
+            pl.read_csv(p, infer_schema=False)
+            .lazy()
+            .filter(pl.col("Status") == "Posted")
+            .with_columns(
+                pl.when(pl.col("CheckNumber") != "").then(pl.col("CheckNumber"))
+            )
+            .select(_SCHWAB_BANKING_JSON_COLUMN_ORDER)
+        )
+
+        annotations = {"source_path": p}
+        annotated_lazy_frame = AnnotatedLazyFrame(
+            lazy_frame=lazy_frame, annotations=annotations
+        )
+        return annotated_lazy_frame
+
+    return extractor
+
+
 def schwab_xml_reader(path: str | Path) -> Extractor:
     """Return a reader for a Schwab OFX/XML 1099 file.
 
