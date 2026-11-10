@@ -1,6 +1,6 @@
 export
 
-.PHONY: help lint fix test tests secrets commit cz bump
+.PHONY: help lint fix test tests secrets commit cz bump push
 
 .DEFAULT_GOAL := help
 
@@ -14,6 +14,7 @@ help:
 	@echo "  make commit      Run lint checks, then create a commitizen commit"
 	@echo "  make cz          Alias for 'make commit'"
 	@echo "  make bump        Bump version, update CHANGELOG, and tag via commitizen"
+	@echo "  make push        Push the current branch and all tags to origin"
 
 lint:
 	uv run ruff check .
@@ -38,3 +39,6 @@ cz: commit
 
 bump:
 	uv run cz bump
+
+push:
+	git push --atomic origin HEAD --tags
