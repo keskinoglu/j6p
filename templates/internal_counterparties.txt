@@ -1,0 +1,14 @@
+# One name per line. No quoting needed: commas and other characters are taken literally.
+# Lines starting with # are comments; blank lines are ignored.
+#
+# A ledger entry is an Internal transfer when its Counterparty contains any of these
+# names (case-insensitive substring match), otherwise External.
+# List every way your own accounts and household members appear as counterparties:
+# your name and your partner's name, name variants ("Last, First", maiden names),
+# and the descriptions your banks use for transfers between your own accounts.
+#
+# Examples:
+# Jane Doe
+# Doe, Jane
+# EXAMPLE BANK TRANSFER 1234
+### Fill Below ###
